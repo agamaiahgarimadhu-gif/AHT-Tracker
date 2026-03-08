@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AHT Tracker Master</title>
+    <style>
+        body { padding: 15px; font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; }
+        .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); position: relative; }
+        #end-btn { position: absolute; top: 10px; right: 10px; background: #e74c3c; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; }
+        #status-label { font-size: 14px; font-weight: bold; color: #1877f2; margin-bottom: 5px; }
+        #timer-display { font-size: 36px; font-weight: bold; text-align: center; margin: 15px 0; font-family: monospace; border-top: 1px solid #eee; padding-top: 10px; }
+        .stats { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .stat-box { background: #e7f3ff; padding: 5px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+        input { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 14px; margin-bottom: 10px; }
+        #submit-btn { width: 100%; padding: 12px; background: #2ecc71; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .mode-select { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .mode-btn { width: 100%; padding: 12px; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; }
+        #prod-start { background: #2ecc71; }
+        #prac-start { background: #3498db; }
+        .hidden { display: none !important; }
+        #sync-loader { font-size: 10px; color: #f39c12; text-align: center; margin-top: 5px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <button id="end-btn" class="hidden">END SESSION</button>
+        <div id="user-greeting" style="font-size:11px; color:#666;">Initializing...</div>
+        <div id="status-label">Mode: Idle</div>
+        <div class="stats">
+            <div class="stat-box">Prod: <span id="prod-count">0</span></div>
+            <div class="stat-box">Prac: <span id="prac-count">0</span></div>
+        </div>
+        <div id="timer-display">00:00:00</div>
+        <div id="sync-loader">⏳ Sending to Sheet...</div>
+        <div id="mode-selection" class="mode-select">
+            <button id="prod-start" class="mode-btn">START PRODUCTION</button>
+            <button id="prac-start" class="mode-btn">START PRACTICE</button>
+        </div>
+        <div id="task-entry" class="hidden">
+            <input type="text" id="task-input" placeholder="Paste 10-20 char ID">
+            <button id="submit-btn">SUBMIT TASK</button>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SCRIPT_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL"; 
+
+        let empID, currentStatus = "Idle", lastTimestamp = Date.now();
+        let taskHistory = [], counts = { Production: 0, Practice: 0 };
+
+        const taskInput = document.getElementById('task-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const endBtn = document.getElementById('end-btn');
+        const loader = document.getElementById('sync-loader');
+
+        // Initial Setup
+        const loadState = () => {
+            const data = JSON.parse(localStorage.getItem('aht_data') || '{}');
+            const today = new Date().toLocaleDateString();
+            
+            if (data.lastSavedDate && data.lastSavedDate !== today) {
+                localStorage.clear();
+                location.reload();
+                return;
+            }
+
+            empID = data.savedID || prompt("Enter Employee ID:");
+            if (empID) {
+                data.savedID = empID;
+                data.lastSavedDate = today;
+                localStorage.setItem('aht_data', JSON.stringify(data));
+                document.getElementById('user-greeting').innerText = "ID: " + empID;
+            }
+
+            currentStatus = data.currentStatus || "Idle";
+            lastTimestamp = data.lastTimestamp || Date.now();
+            counts = data.counts || { Production: 0, Practice: 0 };
+            taskHistory = data.taskHistory || [];
+            updateUI();
+        };
+
+        async function logTransaction(tid, nextStatus) {
+            const now = Date.now();
+            const duration = formatTime(Math.floor((now - lastTimestamp) / 1000));
+            const cleanID = (tid && tid.length >= 10 && tid.length <= 20) ? tid : "";
+            const finalStatus = (cleanID !== "") ? currentStatus : "Idle";
+
+            const payload = { empID, status: finalStatus, taskID: cleanID, 
+                              startTime: new Date(lastTimestamp).toLocaleTimeString(), 
+                              endTime: new Date(now).toLocaleTimeString(), duration };
+
+            loader.style.display = "block";
+            try {
+                await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+                if (cleanID !== "") counts[currentStatus]++;
+                
+                currentStatus = nextStatus;
+                lastTimestamp = now;
+                saveState();
+                updateUI();
+            } catch (e) {
+                alert("Submission Failed. Check internet.");
+            }
+            loader.style.display = "none";
+        }
+
+        function saveState() {
+            const data = { savedID: empID, currentStatus, lastTimestamp, counts, taskHistory, lastSavedDate: new Date().toLocaleDateString() };
+            localStorage.setItem('aht_data', JSON.stringify(data));
+        }
+
+        submitBtn.onclick = () => {
+            const val = taskInput.value.trim();
+            if (!/^[a-z0-9]{10,20}$/i.test(val)) return alert("Invalid ID (10-20 chars)");
+            if (taskHistory.includes(val)) return alert("Duplicate ID");
+            taskHistory.push(val);
+            logTransaction(val, currentStatus);
+            taskInput.value = "";
+        };
+
+        endBtn.onclick = () => logTransaction("", "Idle");
+        document.getElementById('prod-start').onclick = () => logTransaction("", "Production");
+        document.getElementById('prac-start').onclick = () => logTransaction("", "Practice");
+
+        function updateUI() {
+            document.getElementById('prod-count').innerText = counts.Production;
+            document.getElementById('prac-count').innerText = counts.Practice;
+            document.getElementById('status-label').innerText = "Mode: " + currentStatus;
+            const isIdle = currentStatus === "Idle";
+            document.getElementById('mode-selection').classList.toggle('hidden', !isIdle);
+            document.getElementById('task-entry').classList.toggle('hidden', isIdle);
+            document.getElementById('end-btn').classList.toggle('hidden', isIdle);
+        }
+
+        function formatTime(s) { return new Date(s * 1000).toISOString().substr(11, 8); }
+
+        setInterval(() => {
+            if (currentStatus === "Idle") return document.getElementById('timer-display').innerText = "00:00:00";
+            document.getElementById('timer-display').innerText = formatTime(Math.floor((Date.now() - lastTimestamp) / 1000));
+        }, 1000);
+
+        loadState();
+    </script>
+</body>
+</html>
