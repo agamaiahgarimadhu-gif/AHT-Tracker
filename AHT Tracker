@@ -45,7 +45,7 @@
 
     <script>
         // --- CONFIGURATION ---
-        const SCRIPT_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL"; 
+        const SCRIPT_URL = "https://script.google.com/a/macros/globallogic.com/s/AKfycbz2O-yYWInIQfqObjA5l_TtNSxRPO8NWCamz8y_fARfrSQ40E2F0pv75U_6RQQzMGC9/exec"; 
 
         let empID, currentStatus = "Idle", lastTimestamp = Date.now();
         let taskHistory = [], counts = { Production: 0, Practice: 0 };
